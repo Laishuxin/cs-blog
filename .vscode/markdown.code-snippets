@@ -1,0 +1,11 @@
+{
+  "blog:init": {
+    "prefix": "blog:init",
+    "body": [
+      "---",
+      "highlight: tomorrow-night-blue",
+      "theme: smartblue",
+      "---"
+    ]
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "cs-blog",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "prepare": "husky install"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Laishuxin/cs-blog.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Laishuxin/cs-blog/issues"
+  },
+  "homepage": "https://github.com/Laishuxin/cs-blog#readme",
+  "devDependencies": {
+    "husky": "^8.0.1",
+    "lint-staged": "^13.0.2"
+  },
+  "dependencies": {
+    "execa": "^6.1.0",
+    "fs-extra": "^10.1.0"
+  },
+  "lint-staged": {
+    "*.{js,css,md,ts,tsx,js,jsx,vue}": "prettier --write"
+  },
+  "husky": {
+    "hooks": {
+      "commit-msg": "commitlint -E HUSKY_GIT_PARAMS"
+    }
+  }
+}
