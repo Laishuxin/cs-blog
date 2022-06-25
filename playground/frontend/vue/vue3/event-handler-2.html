@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>事件处理</title>
+  </head>
+  <body>
+    <div>
+      <button id="btn1">click me</button>
+    </div>
+
+    <div>
+      <button id="btn2">add click event</button>
+    </div>
+    <script>
+      const btn1 = document.getElementById('btn1')
+      const btn2 = document.getElementById('btn2')
+      function addEventListenerForBtn1(eventName, listener) {
+        const _vei = btn1._vei || (btn1._vei = {})
+        let invoker = _vei[eventName]
+        if (invoker) {
+          invoker.value = [...invoker.value, listener]
+        } else {
+          invoker = _vei[eventName] = (e) => {
+            invoker.value.forEach((inv) => inv(e))
+          }
+          invoker.value = [listener]
+          btn1.addEventListener(eventName, invoker)
+        }
+        // btn1.addEventListener(eventName, listener)
+      }
+
+      let count = 1
+      btn2.addEventListener('click', () => {
+        let _count = count++
+        addEventListenerForBtn1('click', () => {
+          console.log(`click btn1. event id: ${_count}`)
+        })
+      })
+    </script>
+  </body>
+</html>
