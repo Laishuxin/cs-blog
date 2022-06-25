@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "prepare": "husky install"
+    "prepare": "husky install",
+    "release": "standard-version"
   },
   "repository": {
     "type": "git",
@@ -23,7 +24,8 @@
   },
   "dependencies": {
     "execa": "^6.1.0",
-    "fs-extra": "^10.1.0"
+    "fs-extra": "^10.1.0",
+    "standard-version": "^9.5.0"
   },
   "lint-staged": {
     "*.{js,css,md,ts,tsx,js,jsx,vue}": "prettier --write"
