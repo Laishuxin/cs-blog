@@ -5,7 +5,25 @@
       "---",
       "highlight: tomorrow-night-blue",
       "theme: smartblue",
-      "---"
+      "---",
+      "$0"
+    ]
+  },
+  "data:init": {
+    "prefix": "data:init",
+    "body": [
+      "---",
+      "highlight: tomorrow-night-blue",
+      "theme: smartblue",
+      "---",
+      "",
+      "# $0",
+      "",
+      "## 代码框架",
+      "",
+      "## 实战训练",
+      "",
+      "## 参考文章",
     ]
   }
 }
