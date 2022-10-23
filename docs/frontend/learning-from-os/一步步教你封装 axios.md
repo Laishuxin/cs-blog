@@ -1,4 +1,4 @@
-# 一步步教你封装 axios
+# 跟着开源项目学封装 axios
 
 ## 写在前面
 
@@ -304,7 +304,7 @@ export class VAxios {
    * @param { import('./typings').CreateAxiosOptions } options
    */
   constructor(options) {
-    this._options = options
+    this._options = options || {}
     this._axiosInstance = axios.create(options)
     this._setupInterceptor()
   }
@@ -467,6 +467,442 @@ export default {
 异常，这里我们就不进行测试。
 
 ## 取消重复请求
+
+我们将采用 `AbortController` 来实现取消重复请求的功能，预期效果跟我们前面讨论的一样，
+通过一个简单的配置实现自动取消重复请求。
+
+关于 axios 如何用 `AbortController` 取消请求可以看官方文档：
+[https://axios-http.com/docs/cancellation](https://axios-http.com/docs/cancellation)
+
+为了比较两次实现的效果，我们先提供几个测试案例：
+
+```vue
+<template>
+  <div>
+    <h1>测试重复请求</h1>
+    <el-button @click="handleTestRepeatRequest1">
+      测试重复请求
+    </el-button>
+    <el-button @click="handleTestCancelRepeatRequest">
+      测试自动取消重复请求
+    </el-button>
+    <el-button @click="handleTestRepeatRequest2">
+      测试不取消重复请求
+    </el-button>
+  </div>
+</template>
+
+<script>
+import axios from 'axios'
+import { ElMessage } from 'element-plus'
+import { VAxios } from '../../lib/src/v-axios'
+
+export default {
+  setup() {
+    // ===========================
+    // 测试重复请求
+    // 注意：需要在 handler 外面先实例化（new）VAxios，保证同一个 handler
+    //      多次调用是同一个实例。
+    const vAxios1 = new VAxios({})
+    const handleTestRepeatRequest1 = () => {
+      // 默认支持取消重复请求
+      vAxios1._axiosInstance
+        .request({
+          url: '/api/sleep',
+          params: {
+            timeout: 2 * 1000,
+          },
+        })
+        .then((res) => {
+          console.log('res: ', res)
+        })
+    }
+
+    const vAxios2 = new VAxios({
+      requestOptions: {
+        // 取消重复请求
+        ignoreCancel: true,
+      },
+    })
+    const handleTestCancelRepeatRequest = () => {
+      vAxios2._axiosInstance
+        .request({
+          url: '/api/sleep',
+          params: {
+            timeout: 2 * 1000,
+          },
+        })
+        .then((res) => {
+          console.log('res: ', res)
+        })
+    }
+
+    const vAxios3 = new VAxios({
+      requestOptions: {
+        // 不取消重复请求
+        ignoreCancel: false,
+      },
+    })
+    const handleTestRepeatRequest2 = () => {
+      vAxios3._axiosInstance
+        .request({
+          url: '/api/sleep',
+          params: {
+            timeout: 2 * 1000,
+          },
+        })
+        .then((res) => {
+          console.log('res: ', res)
+        })
+    }
+
+    return {
+      handleTestRepeatRequest1,
+      handleTestRepeatRequest2,
+      handleTestCancelRepeatRequest,
+    }
+  },
+}
+</script>
+```
+
+当我们在页面**疯狂点击**测试重复请求按钮的时候，我们可以网络请求看到我们发起 N 个请求，同时控制台
+也输出了 N 次数据。有两种常用的方案来避免重复请求：
+
+1. 直接取消重复的请求。
+2. 缓存请求。
+
+这里我们采用第一种方案。
+
+参考 axios 官方文档，我们只需要在请求中加入 `signal` 参数后，我们就可以控制本次请求：
+
+```javascript
+// 下面代码复制于 https://axios-http.com/docs/cancellation
+// AbortController 是浏览器自带的 API
+const controller = new AbortController()
+
+axios
+  .get('/foo/bar', {
+    signal: controller.signal,
+  })
+  .then(function (response) {
+    //...
+  })
+// cancel the request
+controller.abort()
+```
+
+为了方便管理，我们需要创建一个 `VAxiosCanceller` 类来管理一个 `VAxios` 所有的请求。
+为了规范化处理，我们提供几个常量和工具函数方便我们后续使用：
+
+```javascript
+// lib/src/constant.js
+export const ContentTypes = {
+  // json
+  JSON: 'application/json;charset=UTF-8',
+  // form-data qs
+  FORM_URLENCODED: 'application/x-www-form-urlencoded;charset=UTF-8',
+  // form-data  upload
+  FORM_DATA: 'multipart/form-data;charset=UTF-8',
+}
+
+export const HttpMethods = {
+  GET: 'GET',
+  POST: 'POST',
+  PUT: 'PUT',
+  DELETE: 'DELETE',
+}
+
+export const ErrorCodes = {
+  SUCCESS: 200,
+  UNAUTHORIZED: 10401,
+}
+
+// lib/src/utils.js
+import { HttpMethods } from './constant'
+
+/**
+ * 规范化请求方法。
+ * @param { string? } httpMethod
+ */
+export function normalizeHttpMethod(httpMethod) {
+  httpMethod = httpMethod || HttpMethods.GET
+  httpMethod = httpMethod.toUpperCase()
+  return httpMethod
+}
+```
+
+接下来实现我们的 `VAxiosCanceller`
+
+```javascript
+// /lib/src/v-axios-canceller.js
+
+import { normalizeHttpMethod } from './utils'
+
+/**
+ * 获取请求的唯一标识。
+ * @param { import("axios").AxiosRequestConfig } config
+ * @returns { string }
+ */
+function getIdentifier(config) {
+  let { method, url, params } = config
+  method = normalizeHttpMethod(method)
+  url = url || ''
+  params = JSON.stringify(params || {})
+  return [method, url, params].join('&')
+}
+
+export class VAxiosCanceller {
+  constructor() {
+    /**
+     * @type { Map<string, AbortController> }
+     */
+    this._identifierToCancellerMap = new Map()
+  }
+
+  /**
+   * @param { import("axios").AxiosRequestConfig } config
+   */
+  addPending(config) {
+    if (config.signal != null) return
+
+    // 取消重复请求，并删除缓存
+    this.removeAndCancelPending(config)
+
+    const identifier = getIdentifier(config)
+    // 将当前请求存储到 map中
+    // 控制判断是为了兼容手动取消
+    const controller = new AbortController()
+    config.signal = controller.signal
+    this._identifierToCancellerMap.set(identifier, controller)
+  }
+
+  /**
+   * 取消重复请求，并删除缓存
+   * @param { import("axios").AxiosRequestConfig } config
+   */
+  removeAndCancelPending(config) {
+    const identifier = getIdentifier(config)
+    const controller = this._identifierToCancellerMap.get(identifier)
+    // 存在重复请求
+    if (controller != null) {
+      controller.abort()
+      config.signal = null
+      this._identifierToCancellerMap.delete(identifier)
+    }
+  }
+
+  /**
+   * 删除缓存，但不取消请求
+   * @param { import("axios").AxiosRequestConfig } config
+   */
+  removePending(config) {
+    const identifier = getIdentifier(config)
+    if (this._identifierToCancellerMap.has(identifier)) {
+      this._identifierToCancellerMap.delete(identifier)
+    }
+  }
+
+  /**
+   * 取消所有的请求，并清空缓存
+   */
+  removeAndCancelAllPending() {
+    this._identifierToCancellerMap.forEach((controller) => controller.abort())
+    this._identifierToCancellerMap.clear()
+  }
+
+  /**
+   * 重置缓存
+   */
+  reset() {
+    this._identifierToCancellerMap = new Map()
+  }
+}
+```
+
+我们用请求的 `method`, `url`, `params` 作为标识唯一请求的 id。
+每次发起请求的时候，我们会生成唯一的 id，然后检查缓存（`_identifierToCancellerMap`）
+中是否有正在运行的请求，如果存在的话，去取消重复的请求。
+
+**注意**：我们执行 `addPending` 之前需要去检查是否 `config.signal` 存在，
+这是因为可能我们会手动取消请求。同时，在取消重复请求后，我们需要清空 `config.signal`。
+
+```javascript
+// 模拟手动取消请求
+const controller = new AbortController()
+vAxios._axiosInstance.request({
+  url: '/api/sleep',
+  params: {
+    timeout: 2 * 1000,
+  },
+  signal: controller.signal,
+})
+```
+
+接下来我们需要考虑如何**优雅**实现自动取消了。
+自动取消重复的思路如下：
+
+1. 在发起请求之前，我们为当前请求生成唯一的 id，放入请求观察队列中（在这里就是我们的 \_identifierToCancellerMap）。
+2. 请求完成后，在请求观察队列中删除该请求。
+3. 如果请求还没有完成，又发起同样的请求，我们则从观察队列中拿到 `canceller`，将之前的请求废弃。
+
+所以我们可以在每次请求的时候都将请求放入队列（\_identifierToCancellerMap）中，完成后删除即可。
+
+这种方案类似于：
+
+```javascript
+isLoading = false
+promise
+  .then(() => {
+    isLoading = false
+  })
+  .catch(() => {
+    isLoading = false
+  })
+```
+
+所以这里我们借助拦截器来实现这种功能，我们需要重新改造我们的拦截器，
+
+- `isLoading = true` 的执行时机对应到 interceptors 就是 `interceptors.request.use(() => { isLoading = true })`
+- `promise.then()` 的执行时机对应到 interceptors 就是 `interceptors.response.use(() => { isLoading = true })`
+- `promise.catch()` 的执行时机对应到 interceptors 就是 `interceptors.response.use(undefined , () => { isLoading = true })`
+
+事实上，axios 的拦截器就是基于 `Promise` 实现的**链式调用** 😜
+(https://github.com/axios/axios/blob/v1.x/lib/core/Axios.js#L86, https://www.cnblogs.com/wangjiachen666/p/11307815.html)
+
+改造后的代码如下：
+
+```javascript
+export class VAxios {
+  /**
+   * @param { import('./typings').CreateAxiosOptions } options
+   */
+  constructor(options) {
+    this._options = options || {}
+    this._axiosInstance = axios.create(options)
+    this._setupInterceptor()
+    this._canceller = new VAxiosCanceller()
+  }
+
+  _setupInterceptor() {
+    const { transform } = this._options
+    const {
+      requestInterceptors,
+      requestInterceptorsCatch,
+      responseInterceptors,
+      responseInterceptorsCatch,
+    } = transform || {}
+
+    // 添加请求拦截器
+    // if (isFunction(requestInterceptors)) {
+    //   this._axiosInstance.interceptors.request.use((config) => {
+    //     // 为了针对不同请求进行处理，我们将实例化的 options 也一并传过去
+    //     return requestInterceptors(config, this._options)
+    //   })
+    // }
+    this._axiosInstance.interceptors.request.use((config) => {
+      let canIgnore = true
+
+      // 1. 读取当前请求配置
+      if (
+        config.requestOptions &&
+        config.requestOptions.ignoreCancel !== undefined
+      ) {
+        canIgnore = config.requestOptions.ignoreCancel
+
+        // 2. 读取全局配置
+      } else if (
+        this._options.requestOptions &&
+        this._options.requestOptions.ignoreCancel !== undefined
+      ) {
+        canIgnore = this._options.requestOptions.ignoreCancel
+      }
+
+      if (canIgnore) {
+        this._canceller.addPending(config)
+      }
+
+      if (isFunction(requestInterceptors)) {
+        config = requestInterceptors(config, this._options)
+      }
+
+      // 注意把 config 返回
+      return config
+    })
+
+    // 添加请求异常拦截器
+    if (isFunction(requestInterceptorsCatch)) {
+      this._axiosInstance.interceptors.request.use(undefined, (error) => {
+        return requestInterceptorsCatch(error, this._options)
+      })
+    }
+
+    // 添加响应拦截器
+    // if (isFunction(responseInterceptors)) {
+    //   // 后面我们会合并配置，所有的配置会存放到 res.config 下，所以我们只需要传 res
+    //   this._axiosInstance.interceptors.response.use((res) => {
+    //     return responseInterceptors(res)
+    //   })
+    // }
+
+    this._axiosInstance.interceptors.response.use((res) => {
+      if (res && res.config) {
+        // 这里并不需要取消请求，因为请求已经得到响应了
+        this._canceller.removePending(res.config)
+      }
+
+      if (isFunction(responseInterceptors)) {
+        // 后面我们会合并配置，所有的配置会存放到 res.config 下，所以我们只需要传 res
+        res = responseInterceptors(res)
+      }
+
+      return res
+    })
+
+    // 添加响应异常拦截器
+    // if (isFunction(responseInterceptorsCatch)) {
+    //   this._axiosInstance.interceptors.response.use(undefined, (error) => {
+    //     // 涉及到超时请求我们把 axiosInstance 也一并传过去
+    //     // 方便超时进行请求
+    //     return responseInterceptorsCatch(this._axiosInstance, error)
+    //   })
+    // }
+
+    this._axiosInstance.interceptors.response.use(undefined, (error) => {
+      // 只有 axios error 才有可能携带 config
+      if (axios.isAxiosError(error) && !axios.isCancel(error) && error.config) {
+        this._canceller.removePending(error.config)
+      }
+
+      if (isFunction(responseInterceptorsCatch)) {
+        // 涉及到超时请求我们把 axiosInstance 也一并传过去
+        // 方便超时进行请求
+        return responseInterceptorsCatch(this._axiosInstance, error)
+      }
+
+      throw error
+    })
+  }
+}
+```
+
+**注意**：
+
+- 在 response interceptors 中，我们只需要删除 pending 中的请求，并没有将其 `abort()`，这是因为响应
+  已经完成了，再次取消就多余了。
+- 存在一种边界条件：同个时间段重复请求多次（3 次及以上），这种情况下就应该 `abort()`
+  所以我们用 `!axios.isCancel(error)` 剔除该情况。
+
+聪明的小伙伴已经注意到了我们并没有在 interceptors 中调用 `abort()`，这是我们在 addPending 的时候已经
+自动实现这个功能了 😜。
+
+接下来我们测试：
+
+![](images/2022-10-23-19-47-45.png)
+
+![](images/2022-10-23-19-48-21.png)
+
+至此，我们就实现了取消重复请求的功能。
 
 ## 支持 form-data
 
