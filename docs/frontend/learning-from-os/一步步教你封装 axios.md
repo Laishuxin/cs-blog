@@ -256,6 +256,216 @@ export function isVoid(v) {
 
 ## 拦截器
 
+在前面我们提到了 axios 拦截器需要实例化后才能添加。为了实现一开始实例化 axios 时，
+通过参数配置拦截器，我们需要对 axios 进行封装。
+
+基于**组合优于继承**的设计理念，我们会创建自己的 axios 类（VAxios），并采用组合的方式对其进行拓展。
+我们的 VAxios 会在原先 axios 实例对象参数基础上添加几个重要的参数：
+
+```typescript
+// /lib/typings/index.d.ts
+export interface CreateAxiosOptions extends AxiosRequestConfig {
+  // 认证模型，默认为 Bearer （jwt token）
+  authenticationScheme?: string
+  // 存放所有对数据进行转换的函数
+  transform: AxiosTransform
+  // 实际请求的配置项
+  requestOptions: RequestOptions
+}
+```
+
+（本项目是基于 javascript 实现的，对 typescript 不太熟悉也不会影响对后续的实现逻辑）
+
+我们期望的效果如下：
+
+```javascript
+const myAxios = new VAxios({
+  transform: {
+    requestInterceptors: () => {},
+    requestInterceptorsCatch: () => {},
+    responseInterceptors: () => {},
+    responseInterceptorsCatch: () => {},
+  },
+  // ...原始 axios config
+})
+```
+
+当传入的 `transform` 有对应的拦截函数，VAxios 自动帮我们注册拦截器。
+
+下面让我们实现第一版的拦截器：
+
+```javascript
+// /lib/src/v-axios.js
+import axios from 'axios'
+import { isFunction } from './utils'
+
+export class VAxios {
+  /**
+   * @param { import('./typings').CreateAxiosOptions } options
+   */
+  constructor(options) {
+    this._options = options
+    this._axiosInstance = axios.create(options)
+    this._setupInterceptor()
+  }
+
+  _setupInterceptor() {
+    const { transform } = this._options
+    const {
+      requestInterceptors,
+      requestInterceptorsCatch,
+      responseInterceptors,
+      responseInterceptorsCatch,
+    } = transform || {}
+
+    // 添加请求拦截器
+    if (isFunction(requestInterceptors)) {
+      this._axiosInstance.interceptors.request.use((config) => {
+        // 为了针对不同请求进行处理，我们将实例化的 options 也一并传过去
+        return requestInterceptors(config, this._options)
+      })
+    }
+
+    // 添加请求异常拦截器
+    if (isFunction(requestInterceptorsCatch)) {
+      this._axiosInstance.interceptors.request.use(undefined, (error) => {
+        return requestInterceptorsCatch(error, this._options)
+      })
+    }
+
+    // 添加响应拦截器
+    if (isFunction(responseInterceptors)) {
+      // 后面我们会合并配置，所有的配置会存放到 res.config 下，所以我们只需要传 res
+      this._axiosInstance.interceptors.response.use((res) => {
+        return responseInterceptors(res)
+      })
+    }
+
+    // 添加响应异常拦截器
+    if (isFunction(responseInterceptorsCatch)) {
+      this._axiosInstance.interceptors.response.use(undefined, (error) => {
+        // 涉及到超时请求我们把 axiosInstance 也一并传过去
+        // 方便超时进行请求
+        return responseInterceptorsCatch(this._axiosInstance, error)
+      })
+    }
+  }
+}
+```
+
+接下来，我们在前端 app 简单测试下：
+
+```vue
+<template>
+  <!-- /frontend/src/App.vue -->
+  <div>
+    <h1>
+      测试基础的拦截器
+    </h1>
+    <el-button @click="handleTestRequestInterceptor()">
+      测试请求拦截器
+    </el-button>
+
+    <el-button @click="handleTestResponseInterceptor()">
+      测试响应拦截器
+    </el-button>
+
+    <el-button @click="handleTestResponseCatchInterceptor()">
+      测试响应异常拦截器
+    </el-button>
+  </div>
+</template>
+
+<script>
+import axios from 'axios'
+import { ElMessage } from 'element-plus'
+import { VAxios } from '../../lib/src/v-axios'
+
+export default {
+  setup() {
+    const handleTestRequestInterceptor = () => {
+      const vAxios = new VAxios({
+        transform: {
+          requestInterceptors(config, options) {
+            const headers = config.headers
+            headers['Authorization'] = `Bearer fake token`
+            config.headers = headers
+
+            // 注意返回 config，否则无法执行
+            return config
+          },
+        },
+      })
+
+      // 不推荐直接用 _axiosInstance 发起请求，后面会优化
+      vAxios._axiosInstance
+        .request({
+          url: '/api/data',
+        })
+        .then((res) => {
+          console.log('res: ', res)
+        })
+    }
+
+    const handleTestResponseInterceptor = () => {
+      const vAxios = new VAxios({
+        transform: {
+          responseInterceptors(res) {
+            const { data } = res
+            if (data.code == 200) return data.result
+            throw new Error(data.message)
+          },
+        },
+      })
+
+      // 不推荐直接用 _axiosInstance 发起请求，后面会优化
+      vAxios._axiosInstance
+        .request({
+          url: '/api/data',
+        })
+        .then((res) => {
+          console.log('res: ', res)
+        })
+    }
+
+    const handleTestResponseCatchInterceptor = () => {
+      const vAxios = new VAxios({
+        transform: {
+          responseInterceptorsCatch(instance, error) {
+            console.log('捕获异常: ', error)
+            throw error
+          },
+        },
+      })
+
+      // 不推荐直接用 _axiosInstance 发起请求，后面会优化
+      vAxios._axiosInstance.request({
+        url: '/not-found',
+      })
+    }
+
+    return {
+      handleTestRequestInterceptor,
+      handleTestResponseInterceptor,
+      handleTestResponseCatchInterceptor,
+    }
+  },
+}
+</script>
+```
+
+1. 测试请求拦截器：当我们点击 `测试请求拦截器` 后，我们可以在网络请求看到 header 上自动加上 `Authorization`
+   说明我们配置成功。
+   ![](images/2022-10-23-17-34-59.png)
+
+2. 测试响应拦截器：当我们点击 `测试响应拦截器` 后，我们可以在网络请求看到请求成功，并在**控制台**打印出实际的结果，说明我们配置成功。
+   ![](images/2022-10-23-17-39-04.png)
+3. 测试响应异常拦截器：我们请求一个**不存在**的接口，当我们点击 `测试响应异常拦截器` 后，在**控制台**打印出错误异常，说明我们配置成功。
+   ![](images/2022-10-23-17-40-48.png)
+
+细心的小伙伴也发现了，我们并没有对请求异常进行测试。这是因为这种情况很少出现，其次我们也可以其他手段捕获到请求
+异常，这里我们就不进行测试。
+
 ## 取消重复请求
 
 ## 支持 form-data
