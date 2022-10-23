@@ -17,7 +17,7 @@
   },
   "references": [
     {
-      "path": "./tsconfig.config.json"
+      "path": "./jsconfig.config.json"
     }
   ]
 }

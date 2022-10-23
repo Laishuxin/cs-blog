@@ -1,6 +1,7 @@
-import type { AxiosRequestConfig } from "axios";
+import type { AxiosError, AxiosRequestConfig, AxiosResponse } from "axios";
 
 export interface CreateAxiosOptions extends AxiosRequestConfig {
+  authenticationScheme?: string;
   transform: AxiosTransform;
   requestOptions: RequestOptions;
 }
@@ -50,17 +51,13 @@ export interface AxiosTransform {
    */
   responseInterceptorsCatch?: (
     axiosInstance: AxiosResponse,
-    error: Error
+    error: Error | AxiosError
   ) => void;
 }
 
-export type ErrorMessageMode = "none" | "modal" | "message" | undefined;
+// export type ErrorMessageMode = "none" | "modal" | "message" | undefined;
 
 export interface RequestOptions {
-  // Splicing request parameters to url
-  joinParamsToUrl?: boolean;
-  // Format request parameter time
-  formatDate?: boolean;
   // Whether to process the request result
   isTransformResponse?: boolean;
   // Whether to return native response headers
@@ -72,8 +69,11 @@ export interface RequestOptions {
   apiUrl?: string;
   // 请求拼接路径
   urlPrefix?: string;
-  // Error message prompt type
-  errorMessageMode?: ErrorMessageMode;
+
+  // 当后端返回数据后，是否捕获异常的数据
+  isCatchError?: boolean;
+  // 后端返回数据，且数据显示异常
+  onError?: (payload: Result) => void;
   // Whether to add a timestamp
   joinTime?: boolean;
   ignoreCancel?: boolean;

@@ -1,6 +1,12 @@
-import axios, { AxiosHeaders } from "axios";
+import axios from "axios";
 import { ContentTypes, RequestMethods } from "./constant";
-import { cloneDeep, deepMerge, isFunction, shallowMerge } from "./utils";
+import {
+  cloneDeep,
+  deepMerge,
+  isFunction,
+  shallowMerge,
+  toBoolean,
+} from "./utils";
 import { VAxiosCanceller } from "./vaxios-canceller";
 
 export class VAxios {
@@ -28,8 +34,6 @@ export class VAxios {
     // 1. 添加自动取消重复请求
     // 2. 执行请求配置拦截。
     this._axiosInstance.interceptors.request.use((config) => {
-      vAxiosCanceller.addPending(config);
-
       /**
        * 从当前最新的 config 中检查是否有 requestOptions，
        * 没有的话，从一开始（全局）的配置中获取 requestOptions
@@ -78,12 +82,14 @@ export class VAxios {
     });
 
     // 添加响应异常拦截器
-    if (isFunction(responseInterceptorsCatch)) {
-      this._axiosInstance.interceptors.response.use(
-        undefined,
-        responseInterceptorsCatch
-      );
-    }
+    this._axiosInstance.interceptors.response.use(undefined, (error) => {
+      if (axios.isAxiosError(error)) {
+        vAxiosCanceller.reset();
+      }
+      if (isFunction(responseInterceptorsCatch)) {
+        return responseInterceptorsCatch(this._axiosInstance, error);
+      }
+    });
   }
 
   /**
@@ -126,7 +132,7 @@ export class VAxios {
   }
 
   /**
-   * @param { AxiosHeaders } headers
+   * @param { import('axios').AxiosHeaders } headers
    */
   setHeaders(headers) {
     const defaultHeaders = this._axiosInstance.defaults.headers;
@@ -196,7 +202,7 @@ export class VAxios {
    * @param { import("./interface").RequestOptions } options
    */
   get(config, options) {
-    return this.request({ ...config, method: "GET" }, options);
+    return this.request({ ...config, method: RequestMethods.GET }, options);
   }
 
   /**
@@ -204,7 +210,7 @@ export class VAxios {
    * @param { import("./interface").RequestOptions } options
    */
   post(config, options) {
-    return this.request({ ...config, method: "POST" }, options);
+    return this.request({ ...config, method: RequestMethods.POST }, options);
   }
 
   /**
@@ -212,7 +218,7 @@ export class VAxios {
    * @param { import("./interface").RequestOptions } options
    */
   put(config, options) {
-    return this.request({ ...config, method: "PUT" }, options);
+    return this.request({ ...config, method: RequestMethods.PUT }, options);
   }
 
   /**
@@ -220,6 +226,6 @@ export class VAxios {
    * @param { import("./interface").RequestOptions } options
    */
   delete(config, options) {
-    return this.request({ ...config, method: "DELETE" }, options);
+    return this.request({ ...config, method: RequestMethods.DELETE }, options);
   }
 }

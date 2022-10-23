@@ -13,3 +13,8 @@ export const RequestMethods = {
   PUT: "PUT",
   DELETE: "DELETE",
 };
+
+export const ErrorCodes = {
+  SUCCESS: 200,
+  UNAUTHORIZED: 10401,
+};
