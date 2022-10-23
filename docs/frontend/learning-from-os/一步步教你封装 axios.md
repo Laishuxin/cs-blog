@@ -122,9 +122,137 @@ myAxios.request(
 
 ## 基础配置
 
+在开始本项目之前，请 clone 项目所在的代码仓库，并切换到 `chore: 1. 提供基础的工具` 分支下。
+
+完成后，我们可以看到当前的目录结果如下：
+
+```sh
+├───backend # 模拟后端接口请求
+├───frontend # 用于调试的前端 app
+└───lib # 我们进行封装的 axios
+```
+
+在仓库的**根目录** `npm run bootstrap` 安装三个库所需要的依赖。
+依赖安装完成后，我们运行 `npm run dev:server` 和 `npm run dev:client` 分别启动
+我们的服务器和客户端（涉及到 vite 代理，这里需要先启动服务器）。
+
+后端接口链接为：[http://localhost:3000](http://localhost:3000)
+
+前端 app 链接为：[http://127.0.0.1:5173/](http://127.0.0.1:5173/)
+
+我们打开前端 app，点击按钮，看到如下图所示，表示我们已经启动成功：
+
+![](images/2022-10-23-15-42-28.png)
+
 ### API 接口
 
+api 接口链接： http://localhost:3000/api
+用于我们用了 vite 代理，会将 `http://127.0.0.1:5173/api` 的请求代理
+到 `http://localhost:3000/api` 上，所以我们在前端调用的 axios 请求如下：
+
+```javascript
+axios.request({
+  method: 'get',
+  // 相当于 http://localhost:5173/api/data
+  // 经过代理后会转发到 http://localhost:3000/api/data
+  url: '/api/data',
+})
+```
+
+默认请求格式：application:json
+默认延迟返回：200 ms
+
+统一返回的数据为：
+
+```javascript
+const response = {
+  code: 200, // 本次请求的状态码，200 表示成功。
+  result: {}, // 本次请求的结果。
+  message: '成功', // 本次请求的消息，用于前端展示（如果需要的话）。
+  type: 'success', // 类型，可以用于配置 message box，也可以忽略，为 'success', 'warning', 'error' 一个。
+}
+```
+
+本项目提供了几个简单的接口：
+
+- `GET /api/data`：获取数据。
+- `GET /api/error`：模拟请求失败。
+- `POST /api/login`：模拟登录，成功返回 `access_token`。
+  ```javascript
+  // 表单数据
+  const data = { username: 'admin', password: 'admin' }
+  ```
+- `GET /api/sleep`：模拟延迟返回结果。
+
+  ```javascript
+  // 请求参数
+  const params = { timeout: 200 }
+  ```
+
+- `GET /api/secret`：模拟需要认证的请求。
+  ```javascript
+  // 请求头
+  const headers = { Authorization: 'Bearer fake token' }
+  ```
+
+具体实现请看 `/backend/src/index.js`
+
 ### 依赖说明
+
+1. 我们封装的 axios 要求版本在 `v0.22.0` 及以上。
+   （会用到 `AbortController`，如果实际项目低于该版本，需要调整一下取消重复请求部分的代码，
+   但总体逻辑不变。）
+2. 本项目的 utils 会依赖到 `lodash-es`，可以根据实际需要调整。所有的工具依赖存放在 `/lib/src/utils.js` 下。
+
+在项目开始之前，我们先实现几个简单工具类：
+
+```javascript
+// /lib/src/utils.js
+import { merge } from 'lodash-es'
+export { clone, cloneDeep, isFunction, isString } from 'lodash-es'
+
+/**
+ * 浅合并对象，返回一个全新的对象，并且不会影响原有的对象。
+ */
+export function shallowMerge(...objects) {
+  return Object.assign({}, ...objects)
+}
+
+/**
+ * 深合并对象，返回一个全新的对象，并且不会影响原有的对象。
+ */
+export function deepMerge(...objects) {
+  return merge({}, ...objects)
+}
+
+/**
+ * 将 v 强制转为 boolean
+ * @param {*} v
+ * @returns { boolean }
+ */
+export function toBoolean(v) {
+  return !!v
+}
+
+/**
+ * 延迟执行
+ * @param { number } timeout
+ */
+export function sleep(timeout) {
+  return new Promise((resolve) => setTimeout(resolve, timeout))
+}
+
+export const delay = sleep
+
+/**
+ * 空值判断
+ * @param { unknown } v
+ * @returns { boolean }
+ */
+export function isVoid(v) {
+  return v === null || v === undefined || v === ''
+}
+```
 
 ## 拦截器
 
