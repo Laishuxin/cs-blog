@@ -49,11 +49,20 @@
       测试超时重新发起请求
     </el-button>
   </div>
+
+  <div>
+    <h1>
+      测试发起请求时显示 loading
+    </h1>
+    <el-button @click="handleRequestWithLoading(true)">
+      测试发起请求时显示 loading
+    </el-button>
+  </div>
 </template>
 
 <script setup>
 import { defaultHttp } from "@/vaxios";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElLoading } from "element-plus";
 
 const handleRequest = () => {
   defaultHttp.get({
@@ -135,6 +144,24 @@ const handleRequestTimeout = (isOpenRetry = false) => {
     {
       retryRequest: {
         isOpenRetry,
+      },
+    }
+  );
+};
+
+const handleRequestWithLoading = () => {
+  let instance;
+  defaultHttp.get(
+    {
+      url: "/sleep",
+    },
+    {
+      isLoadingWhenRequest: true,
+      openLoading: () => {
+        instance = ElLoading.service({ fullscreen: true });
+      },
+      closeLoading: () => {
+        if (instance != null) instance.close();
       },
     }
   );
